@@ -898,6 +898,7 @@ async function openSettingsModal() {
       document.getElementById("key-openai").value = data.openai || "";
       document.getElementById("key-anthropic").value = data.anthropic || "";
       document.getElementById("key-serpapi").value = data.serpapi || "";
+      document.getElementById("key-tavily").value = data.tavily || "";
     }
   } catch (e) {
     console.error("Could not fetch settings", e);
@@ -918,6 +919,7 @@ async function saveSettings() {
     openai: document.getElementById("key-openai").value,
     anthropic: document.getElementById("key-anthropic").value,
     serpapi: document.getElementById("key-serpapi").value,
+    tavily: document.getElementById("key-tavily").value,
   };
   
   try {

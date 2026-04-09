@@ -25,7 +25,15 @@ async def web_search(query: str, max_results: int = 5, site: Optional[str] = Non
     if site:
         query = f"site:{site} {query}"
 
+    tavily_key = os.getenv("TAVILY_API_KEY", "")
     serpapi_key = os.getenv("SERPAPI_KEY", "")
+
+    if tavily_key:
+        try:
+            return await _tavily_search(query, max_results, tavily_key)
+        except Exception as e:
+            print(f"Tavily failed: {e}. Falling back to other engines.")
+
     if serpapi_key:
         try:
             return await _serpapi_search(query, max_results, serpapi_key)
@@ -76,6 +84,27 @@ async def _duckduckgo_search(query: str, max_results: int) -> list[dict]:
     except Exception as e:
         print(f"DuckDuckGo async search error: {e}")
         return []
+
+
+async def _tavily_search(query: str, max_results: int, api_key: str) -> list[dict]:
+    import asyncio
+    from tavily import AsyncTavilyClient
+    try:
+        # Using AsyncTavilyClient if available, otherwise synchronous in a thread
+        client = AsyncTavilyClient(api_key=api_key)
+        data = await client.search(query=query, max_results=max_results, search_depth="basic")
+    except ImportError:
+        # Fallback to sync client if older version of tavily installed
+        def sync_tavily():
+            from tavily import TavilyClient
+            return TavilyClient(api_key=api_key).search(query=query, max_results=max_results, search_depth="basic")
+        data = await asyncio.to_thread(sync_tavily)
+
+    results = data.get("results", [])
+    return [
+        {"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("content", "")}
+        for r in results[:max_results]
+    ]
 
 
 
@@ -132,6 +161,18 @@ AVAILABLE RESEARCH TOOLS:
    where basic public facts (HQ, revenue range, industry) are unambiguous
    and widely documented. Use ONLY when other tools return empty results.
    Example use: Basic firmographics for TCS, Infosys, IBM, Google.
+
+5. tavily_extract(url)
+   Best for: Extracting clean, structured content directly from a single URL without loading a heavy browser. Highly efficient for reading specific articles.
+
+6. tavily_research(query)
+   Best for: Deep, comprehensive AI research on complex queries. Scours multiple sources automatically and returns an aggregated research report.
+
+7. tavily_crawl(url)
+   Best for: Finding sub-pages recursively on a specific domain (e.g. finding docs or sub-links).
+
+8. tavily_map(url)
+   Best for: Generating a site map of all URLs available under a specific domain.
 ─────────────────────────────────────────────────────────────────────────────
 """
 
@@ -171,7 +212,7 @@ Based on the task above, decide which tool is most appropriate.
 If the task requires multiple tools (e.g. web_search for broad context AND linkedin_search for headcount), list them in priority order.
 
 Respond in this EXACT format:
-TOOL: <web_search | linkedin_search | browser_visit | llm_knowledge>
+TOOL: <web_search | linkedin_search | browser_visit | llm_knowledge | tavily_extract | tavily_research | tavily_crawl | tavily_map>
 QUERY: <the exact query or URL to use with the tool>
 SECONDARY_TOOL: <optional second tool name, or NONE>
 SECONDARY_QUERY: <optional second query, or NONE>
@@ -245,6 +286,39 @@ async def _execute_tool(tool: str, query: str, company_name: str) -> str:
     elif tool == "llm_knowledge":
         # For LLM knowledge, we return a signal so the calling step knows to rely on llm intrinsic facts
         return f"[LLM_KNOWLEDGE_MODE]: Use your baseline knowledge about {company_name} to answer: {query}"
+
+    elif tool.startswith("tavily_"):
+        import os, asyncio
+        tavily_key = os.getenv("TAVILY_API_KEY", "")
+        if not tavily_key:
+            return "Error: Tavily API Key not configured. Fallback to web_search."
+        
+        try:
+            from tavily import AsyncTavilyClient
+            client = AsyncTavilyClient(api_key=tavily_key)
+            
+            if tool == "tavily_extract":
+                data = await client.extract(urls=[query])
+                results = data.get("results", [])
+                return results[0].get("raw_content", "")[:3000] if results else "No content extracted."
+                
+            elif tool == "tavily_research":
+                # 'research' usually implies advanced deep search
+                data = await client.search(query=query, search_depth="advanced", max_results=5)
+                results = data.get("results", [])
+                return "\n".join([f"[{i+1}] {r.get('title')}: {r.get('content')}" for i, r in enumerate(results)])
+                
+            elif tool == "tavily_crawl":
+                data = await (getattr(client, 'crawl', client.search))(query)
+                return str(data)[:3000]
+                
+            elif tool == "tavily_map":
+                # We attempt to use .map if supported, else fallback gracefully
+                data = await (getattr(client, 'map', client.search))(query)
+                return str(data)[:3000]
+                
+        except Exception as e:
+            return f"{tool} failed: {e}"
 
     else:
         # Fallback to web search

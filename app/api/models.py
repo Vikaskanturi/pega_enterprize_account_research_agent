@@ -25,6 +25,7 @@ class ApiKeysConfig(BaseModel):
     groq: Optional[str] = None
     huggingface: Optional[str] = None
     serpapi: Optional[str] = None
+    tavily: Optional[str] = None
 
 
 class ColumnData(BaseModel):

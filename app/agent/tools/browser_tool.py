@@ -52,8 +52,35 @@ async def _new_page(browser: Browser) -> Page:
     cookies_file = os.getenv("LINKEDIN_COOKIES_FILE", "data/linkedin_cookies.json")
     if os.path.exists(cookies_file):
         with open(cookies_file) as f:
-            cookies = json.load(f)
-        await context.add_cookies(cookies)
+            raw_cookies = json.load(f)
+
+        # ── Permanent cookie sanitizer for any browser-extension export ──────
+        SAMESITE_MAP = {
+            "no_restriction": "None",
+            "unspecified":    "Lax",
+            "strict":         "Strict",
+            "lax":            "Lax",
+            "none":           "None",
+        }
+        VALID_SAMESITE  = {"Strict", "Lax", "None"}
+        # Only Playwright-accepted fields (extra fields cause hard crashes)
+        ALLOWED_FIELDS  = {"name", "value", "domain", "path", "expires", "httpOnly", "secure", "sameSite"}
+
+        sanitized = []
+        for c in raw_cookies:
+            # Remap expirationDate → expires
+            if "expirationDate" in c and "expires" not in c:
+                c["expires"] = c["expirationDate"]
+            # Fix sameSite to a valid Playwright enum value
+            ss = c.get("sameSite", "Lax")
+            c["sameSite"] = SAMESITE_MAP.get(ss.lower(), "Lax")
+            if c["sameSite"] not in VALID_SAMESITE:
+                c["sameSite"] = "Lax"
+            # Strip any unrecognised fields
+            sanitized.append({k: v for k, v in c.items() if k in ALLOWED_FIELDS})
+
+        await context.add_cookies(sanitized)
+
 
     page = await context.new_page()
     # Anti-bot: hide webdriver

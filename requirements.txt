@@ -18,3 +18,4 @@ python-multipart==0.0.12
 aiofiles==24.1.0
 tenacity==9.0.0
 markdownify==0.13.1
+tavily-python==0.7.23

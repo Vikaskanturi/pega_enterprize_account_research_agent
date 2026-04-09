@@ -34,6 +34,7 @@ async def get_settings():
         "groq": mask(_env.get("GROQ_API_KEY", "")),
         "huggingface": mask(_env.get("HUGGINGFACE_API_KEY", "")),
         "serpapi": mask(_env.get("SERPAPI_KEY", "")),
+        "tavily": mask(_env.get("TAVILY_API_KEY", "")),
     }
 
 @router.post("/api/settings")
@@ -73,6 +74,7 @@ async def save_settings(config: ApiKeysConfig):
     set_key("GROQ_API_KEY", config.groq)
     set_key("HUGGINGFACE_API_KEY", config.huggingface)
     set_key("SERPAPI_KEY", config.serpapi)
+    set_key("TAVILY_API_KEY", config.tavily)
     
     # Write back
     with open(env_file, "w") as f:
