@@ -18,14 +18,14 @@ async def run(state: ResearchState, llm_model: str = None, **kwargs) -> Research
     for entity_type, entity_name in entities.items():
         if not entity_name:
             continue
-        results = await web_search(f"{entity_name} LinkedIn company page", site="linkedin.com", max_results=3)
+        results = await web_search(f"{entity_name} LinkedIn company page", site="linkedin.com", max_results=5)
         if not results:
-            results = await web_search(f"{entity_name} LinkedIn", max_results=3)
+            results = await web_search(f"{entity_name} LinkedIn", max_results=5)
 
         linkedin_url = ""
         for r in results:
             url = r["url"]
-            if "linkedin.com/company/" in url:
+            if "linkedin.com" in url and "/company/" in url:
                 linkedin_url = url.split("?")[0]  # strip query params
                 break
 

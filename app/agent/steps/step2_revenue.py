@@ -1,8 +1,15 @@
 """Step 2 — Website Research & Revenue Classification"""
+from typing import Optional
+from pydantic import BaseModel, Field
 from app.agent.state import ResearchState
-from app.agent.tools.llm_tool import llm_query
-from app.agent.tools.search_tool import web_search, format_results_as_text
-from app.agent.tools.browser_tool import fetch_page_text
+from app.agent.tools.llm_tool import llm_structured_query
+from app.agent.tools.search_tool import agentic_search
+
+
+class RevenueResult(BaseModel):
+    primary_revenue_source: str = Field(default="Unknown", description="Primary source of revenue, e.g. 'IT consulting services'")
+    classification: str = Field(default="Unknown", description="'Software' if core business is software/IT, 'Non-Software' otherwise")
+    reasoning: str = Field(default="", description="1-2 sentence explanation")
 
 
 async def run(state: ResearchState, llm_model: str = None, **kwargs) -> ResearchState:
@@ -10,52 +17,41 @@ async def run(state: ResearchState, llm_model: str = None, **kwargs) -> Research
     company = state.company_name
     state.add_log(2, f"Researching revenue classification for: {company}")
 
-    # Try to visit official website
-    results = await web_search(f"{company} official website", max_results=3)
-    website_text = ""
-    if results:
-        url = results[0]["url"]
-        state.add_log(2, f"Visiting website: {url}")
-        website_text = await fetch_page_text(url)
-        website_text = website_text[:3000]
+    # Let the LLM decide the best search strategy for finding revenue/business model
+    search_result = await agentic_search(
+        task_description="Find primary revenue source, business model, and whether core business is software or non-software",
+        company_name=company,
+        llm_model=llm_model,
+    )
+    state.add_log(2, f"Search strategy chosen: {search_result['strategy']} — {search_result['reasoning']}")
+    search_text = search_result["raw_results"]
 
-    # Supplement with LLM knowledge
     prompt = f"""You are analyzing {company} for B2B sales research.
 
-Website content (may be partial):
-{website_text[:1500] if website_text else 'Not available'}
+Research data gathered:
+{search_text[:3000]}
 
-Search results:
-{format_results_as_text(results)}
+Note: If basic facts are missing but the company is a well-known Fortune 500 or global enterprise, use your internal baseline knowledge.
 
-Answer these questions precisely:
-1. What does {company} do? (2-3 sentences)
-2. What is their PRIMARY source of revenue? (1 sentence, e.g. "Insurance premiums", "Enterprise software licensing")
-3. Is their core business SOFTWARE or NON-SOFTWARE?
-   - Software = company's main product IS software (like Autodesk, Salesforce)
-   - Non-Software = software is just a tool for their real business (like a bank, insurer, manufacturer)
+Determine:
+1. What is their PRIMARY source of revenue? (e.g. "Insurance premiums", "IT consulting services", "Enterprise software licensing")
+2. Is their core business SOFTWARE or NON-SOFTWARE?
+   - Software = company's main product/service is software, technology delivery, or IT consulting (like TCS, Accenture, Salesforce)
+   - Non-Software = software is just a supporting internal tool (like a bank, insurer, manufacturer)
 
-Respond in this exact format:
-PRIMARY_REVENUE_SOURCE: <brief description>
-CLASSIFICATION: <Software | Non-Software>
-REASONING: <1-2 sentences>"""
+Extract the following JSON fields for company: {company}"""
 
-    response = await llm_query(prompt, model=llm_model)
+    result: RevenueResult = await llm_structured_query(
+        prompt=prompt,
+        pydantic_model=RevenueResult,
+        model=llm_model,
+    )
     state.step_models_used[2] = llm_model or "default"
 
-    # Parse response
-    lines = response.strip().split("\n")
-    for line in lines:
-        if line.startswith("PRIMARY_REVENUE_SOURCE:"):
-            state.col6_primary_revenue_source = line.split(":", 1)[1].strip()
-        elif line.startswith("CLASSIFICATION:"):
-            val = line.split(":", 1)[1].strip()
-            if "non-software" in val.lower():
-                state.col7_software_or_not = "Non-Software"
-            else:
-                state.col7_software_or_not = "Software"
-        elif line.startswith("REASONING:"):
-            state.add_log(2, f"Reasoning: {line.split(':', 1)[1].strip()}")
+    state.col6_primary_revenue_source = result.primary_revenue_source
+    state.col7_software_or_not = result.classification
+    if result.reasoning:
+        state.add_log(2, f"Reasoning: {result.reasoning}")
 
     state.add_log(2, f"Revenue source: {state.col6_primary_revenue_source}, Type: {state.col7_software_or_not}")
     return state

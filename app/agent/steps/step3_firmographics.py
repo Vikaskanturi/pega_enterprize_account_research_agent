@@ -1,7 +1,14 @@
 """Step 3 — Basic Firmographics"""
+from pydantic import BaseModel, Field
 from app.agent.state import ResearchState
-from app.agent.tools.llm_tool import llm_query
-from app.agent.tools.search_tool import web_search, format_results_as_text
+from app.agent.tools.llm_tool import llm_structured_query
+from app.agent.tools.search_tool import agentic_search
+
+
+class FirmographicsResult(BaseModel):
+    industry: str = Field(default="Unknown", description="Industry sector, e.g. 'IT Services & Consulting'")
+    headquarters: str = Field(default="Unknown", description="City, Country format, e.g. 'Mumbai, India'")
+    annual_revenue: str = Field(default="Unknown", description="USD figure with units, e.g. '$29 billion'")
 
 
 async def run(state: ResearchState, llm_model: str = None, **kwargs) -> ResearchState:
@@ -9,29 +16,33 @@ async def run(state: ResearchState, llm_model: str = None, **kwargs) -> Research
     company = state.company_name
     state.add_log(3, f"Gathering firmographics for: {company}")
 
-    results = await web_search(f"{company} industry headquarters annual revenue employees", max_results=5)
-    search_text = format_results_as_text(results)
+    search_result = await agentic_search(
+        task_description="Find industry sector, headquarters city/country, and annual revenue",
+        company_name=company,
+        llm_model=llm_model,
+    )
+    state.add_log(3, f"Search strategy: {search_result['strategy']} — {search_result['reasoning']}")
+    search_text = search_result["raw_results"]
 
-    prompt = f"""Extract firmographic details for {company} from the search results below.
+    prompt = f"""Extract firmographic details for {company} from the research data below.
 
-Search Results:
+Research Data:
 {search_text}
 
-Respond in this exact format (use 'Unknown' if data not found):
-INDUSTRY: <industry sector, e.g. "Financial Services", "Healthcare Technology">
-HEADQUARTERS: <City, Country>
-ANNUAL_REVENUE: <USD figure with units, e.g. "$2.3 billion" or "$450 million">"""
+Note: If basic facts (industry, HQ location, annual revenue) are missing but the company is a globally renowned Fortune 500 or large enterprise, use your internal baseline knowledge to answer accurately.
 
-    response = await llm_query(prompt, model=llm_model)
+Extract the following firmographic JSON fields for company: {company}"""
+
+    result: FirmographicsResult = await llm_structured_query(
+        prompt=prompt,
+        pydantic_model=FirmographicsResult,
+        model=llm_model,
+    )
     state.step_models_used[3] = llm_model or "default"
 
-    for line in response.strip().split("\n"):
-        if line.startswith("INDUSTRY:"):
-            state.col4_industry = line.split(":", 1)[1].strip()
-        elif line.startswith("HEADQUARTERS:"):
-            state.col5_headquarters = line.split(":", 1)[1].strip()
-        elif line.startswith("ANNUAL_REVENUE:"):
-            state.col8_annual_revenue = line.split(":", 1)[1].strip()
+    state.col4_industry = result.industry
+    state.col5_headquarters = result.headquarters
+    state.col8_annual_revenue = result.annual_revenue
 
     state.add_log(3, f"Industry: {state.col4_industry} | HQ: {state.col5_headquarters} | Revenue: {state.col8_annual_revenue}")
     return state

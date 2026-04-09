@@ -165,6 +165,7 @@ function defaultModels() {
 
 function renderModelGrid(models) {
   const grid = document.getElementById("model-grid");
+  if (!grid) return;
   grid.innerHTML = "";
   for (const m of models) {
     const badge = m.cost === "Free" ? "free" : m.speed === "Fast" ? "fast" : "pro";
@@ -301,6 +302,12 @@ async function startResearch() {
     exportBtn.disabled = true;
     exportBtn.style.opacity = "0.45";
     exportBtn.style.cursor = "not-allowed";
+  }
+  const saveLocalBtn = document.getElementById("save-local-btn");
+  if (saveLocalBtn) {
+    saveLocalBtn.disabled = true;
+    saveLocalBtn.style.opacity = "0.45";
+    saveLocalBtn.style.cursor = "not-allowed";
   }
 
   addLog("info", 0, `Starting research for: ${company} [model: ${modelToUse}]`);
@@ -458,6 +465,12 @@ function updateResultsPreview(state) {
     exportBtn.disabled = false;
     exportBtn.style.opacity = "1";
     exportBtn.style.cursor = "pointer";
+  }
+  const saveLocalBtn = document.getElementById("save-local-btn");
+  if (saveLocalBtn) {
+    saveLocalBtn.disabled = false;
+    saveLocalBtn.style.opacity = "1";
+    saveLocalBtn.style.cursor = "pointer";
   }
 
   const cols = state.columns || {};
@@ -802,6 +815,55 @@ async function exportToExcel() {
   } finally {
     btn.innerHTML = originalText;
     // Re-enable only if we still have data
+    if (currentState) {
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      btn.style.cursor = "pointer";
+      
+      const saveLocalBtn = document.getElementById("save-local-btn");
+      if (saveLocalBtn) {
+        saveLocalBtn.disabled = false;
+        saveLocalBtn.style.opacity = "1";
+        saveLocalBtn.style.cursor = "pointer";
+      }
+    }
+  }
+}
+
+// ── Save Locally (Append to Master Excel file) ───────────────────────────
+
+async function saveLocally() {
+  if (!currentState) {
+    showToast("No research data to save yet.", "error");
+    return;
+  }
+
+  const btn = document.getElementById("save-local-btn");
+  const originalText = btn.innerHTML;
+  btn.innerHTML = "⏳ Saving...";
+  btn.disabled = true;
+
+  try {
+    const response = await fetch(`${API_BASE}/api/save_local`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        columns: currentState.columns || {},
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(err.detail || `Server error ${response.status}`);
+    }
+
+    const data = await response.json();
+    showToast(data.message, "success");
+  } catch (err) {
+    console.error("Save failed:", err);
+    showToast(`Save failed: ${err.message}`, "error");
+  } finally {
+    btn.innerHTML = originalText;
     if (currentState) {
       btn.disabled = false;
       btn.style.opacity = "1";

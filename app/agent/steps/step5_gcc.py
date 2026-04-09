@@ -1,7 +1,17 @@
 """Step 5 — GCC (Global Capability Centre) Check in India"""
+from typing import Optional
+from pydantic import BaseModel, Field
 from app.agent.state import ResearchState
-from app.agent.tools.llm_tool import llm_query
-from app.agent.tools.search_tool import web_search, format_results_as_text
+from app.agent.tools.llm_tool import llm_structured_query
+from app.agent.tools.search_tool import agentic_search, web_search, format_results_as_text
+
+
+class GCCResult(BaseModel):
+    has_gcc: str = Field(default="No", description="'Yes' if company has GCC(s) in India, 'No' otherwise")
+    gcc_count: str = Field(default="N/A", description="Number of GCCs, or 'N/A'")
+    gcc_locations: str = Field(default="N/A", description="Comma-separated cities, e.g. 'Bangalore, Hyderabad', or 'N/A'")
+    main_gcc: str = Field(default="N/A", description="City with highest headcount GCC, or 'N/A'")
+    evidence: str = Field(default="", description="1 sentence explaining the source/confidence level")
 
 
 async def run(state: ResearchState, llm_model: str = None, **kwargs) -> ResearchState:
@@ -9,44 +19,41 @@ async def run(state: ResearchState, llm_model: str = None, **kwargs) -> Research
     company = state.company_name
     state.add_log(5, f"Checking for GCCs in India for: {company}")
 
-    gcc_results = await web_search(f"{company} GCC in India Global Capability Centre", max_results=4)
-    ops_results = await web_search(f"{company} operations centers India", max_results=4)
-    cap_results = await web_search(f"{company} capability centre India", max_results=3)
-
-    all_text = (
-        format_results_as_text(gcc_results)
-        + "\n\n" + format_results_as_text(ops_results)
-        + "\n\n" + format_results_as_text(cap_results)
+    # LLM-chosen primary strategy for GCC research
+    gcc_search = await agentic_search(
+        task_description="Find Global Capability Centre (GCC) presence in India — count, locations, and names of GCC centers",
+        company_name=company,
+        llm_model=llm_model,
+        context=f"Industry: {state.col4_industry or 'Unknown'}, HQ: {state.col5_headquarters or 'Unknown'}",
     )
+    state.add_log(5, f"GCC search strategy: {gcc_search['strategy']} — {gcc_search['reasoning']}")
+
+    # Supplement with a direct web search for broader coverage
+    supp_results = await web_search(f"{company} operations centers India GCC capability", max_results=4)
+    all_text = gcc_search["raw_results"] + "\n\n" + format_results_as_text(supp_results)
 
     prompt = f"""Determine if {company} has any Global Capability Centres (GCCs) in India.
 
 A GCC is a large captive offshore delivery center (typically 200+ employees), distinct from a small satellite office.
 
-Search Results:
+Research Data:
 {all_text}
 
-Respond in this EXACT format:
-HAS_GCC: <Yes | No>
-GCC_COUNT: <number or N/A>
-GCC_LOCATIONS: <comma-separated list of cities, or N/A>
-MAIN_GCC: <city/location with highest headcount, or N/A>
-EVIDENCE: <1 sentence explaining the source/confidence>"""
+Extract the GCC presence JSON fields for company: {company}"""
 
-    response = await llm_query(prompt, model=llm_model)
+    result: GCCResult = await llm_structured_query(
+        prompt=prompt,
+        pydantic_model=GCCResult,
+        model=llm_model,
+    )
     state.step_models_used[5] = llm_model or "default"
 
-    for line in response.strip().split("\n"):
-        if line.startswith("HAS_GCC:"):
-            state.col13_gcc_in_india = line.split(":", 1)[1].strip()
-        elif line.startswith("GCC_COUNT:"):
-            state.col14_number_of_gccs = line.split(":", 1)[1].strip()
-        elif line.startswith("GCC_LOCATIONS:"):
-            state.col15_gcc_locations = line.split(":", 1)[1].strip()
-        elif line.startswith("MAIN_GCC:"):
-            state.col16_main_gcc = line.split(":", 1)[1].strip()
-        elif line.startswith("EVIDENCE:"):
-            state.add_log(5, line.split(":", 1)[1].strip())
+    state.col13_gcc_in_india = result.has_gcc
+    state.col14_number_of_gccs = result.gcc_count
+    state.col15_gcc_locations = result.gcc_locations
+    state.col16_main_gcc = result.main_gcc
+    if result.evidence:
+        state.add_log(5, result.evidence)
 
     # Normalize N/A for No GCCs
     if state.col13_gcc_in_india == "No":

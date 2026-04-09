@@ -330,36 +330,78 @@ async def get_research(job_id: str):
     return jobs[job_id]
 
 
+MASTER_EXCEL_PATH = "output/research_results.xlsx"
+
+
 @router.post("/api/export")
 async def export_excel_from_state(payload: dict):
     """
-    Generate and download a fresh Excel file from the provided research state.
-    Accepts the full state dict (with a 'columns' key) from the frontend.
-    This is independent of what's on disk — it re-generates from the live data.
+    Upsert the provided research state into the single shared master Excel file
+    (output/research_results.xlsx) and serve it as a download.
+    - If the file does not exist it is created fresh.
+    - If a row for the same company already exists it is updated in-place.
+    - Otherwise a new row is appended.
     """
-    import re, os
-    from app.agent.tools.excel_tool import write_output_excel
+    import os
+    from app.agent.tools.excel_tool import upsert_to_master_excel
 
     columns = payload.get("columns", {})
-    company_name = payload.get("company_name", "research")
 
     if not columns:
         raise HTTPException(status_code=400, detail="No research data provided to export.")
 
-    # Sanitise company name for use in filename and path
-    safe_name = re.sub(r"[^a-z0-9_\-]", "_", company_name.lower()).strip("_")
-    filename = f"pega_research_{safe_name}.xlsx"
-    output_path = f"output/export_{safe_name}.xlsx"
-
     os.makedirs("output", exist_ok=True)
-    write_output_excel([columns], output_path=output_path)
+    upsert_to_master_excel(columns, output_path=MASTER_EXCEL_PATH)
 
+    filename = "pega_research_results.xlsx"
     return FileResponse(
-        path=output_path,
+        path=MASTER_EXCEL_PATH,
         filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@router.post("/api/save_local")
+async def save_local_master_excel(payload: dict):
+    """
+    Upsert the current research data into the single shared master Excel file
+    (output/research_results.xlsx).  Creates the file if it doesn't exist.
+    """
+    import os
+    from app.agent.tools.excel_tool import upsert_to_master_excel
+    columns = payload.get("columns", {})
+    if not columns:
+        raise HTTPException(status_code=400, detail="No research data provided to save.")
+
+    os.makedirs("output", exist_ok=True)
+    try:
+        path = upsert_to_master_excel(columns, output_path=MASTER_EXCEL_PATH)
+        return {"status": "success", "message": f"Saved to master file: {path}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save: {str(e)}")
+
+
+@router.get("/api/download")
+async def download_master_excel():
+    """
+    Serve the single shared master Excel file as a download.
+    Returns 404 if no research has been run yet.
+    """
+    import os
+    if not os.path.exists(MASTER_EXCEL_PATH):
+        raise HTTPException(status_code=404, detail="No research results file found yet.")
+
+    return FileResponse(
+        path=MASTER_EXCEL_PATH,
+        filename="pega_research_results.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="pega_research_results.xlsx"',
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
         },

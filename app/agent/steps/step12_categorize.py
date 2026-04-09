@@ -1,6 +1,12 @@
 """Step 12 — Final Categorization (E1 / E1.1 / E2 / E3)"""
+from pydantic import BaseModel, Field
 from app.agent.state import ResearchState
-from app.agent.tools.llm_tool import llm_query
+from app.agent.tools.llm_tool import llm_structured_query
+
+
+class CategorizationResult(BaseModel):
+    enterprise_type: str = Field(default="E2", description="One of: E1, E1.1, E2, E3")
+    reasoning: str = Field(default="", description="2-3 sentences explaining the classification with specific evidence")
 
 
 async def run(state: ResearchState, llm_model: str = None, **kwargs) -> ResearchState:
@@ -26,37 +32,30 @@ RESEARCH SUMMARY:
 - GCC in India: {state.col13_gcc_in_india}
 
 ENTERPRISE TYPE DEFINITIONS:
-- E1 (Fully Outsourced): Completely outsourced development, minimal internal engineering, no/little tech hiring. High service company presence.
-- E1.1 (Transitioning In-House): Currently outsources but actively building internal team. Service company signals PLUS meaningful engineering headcount AND active tech hiring.
-- E2 (Non-Software Enterprise): Primary business is NOT software (insurance, banking, manufacturing, etc.). Software is a supporting tool, not the core product.
-- E3 (Software-First Enterprise): Primary business IS software. Strong internal engineering culture. Prefers build-over-buy but may use enterprise platforms.
+- E1 (Fully Outsourced): Completely outsourced development, minimal internal engineering, no/little tech hiring.
+- E1.1 (Transitioning In-House): Currently outsources but actively building internal team.
+- E2 (Non-Software Enterprise): Primary business is NOT software (e.g. legacy insurance, banking, manufacturing). Software is a support function.
+- E3 (Software-First or IT Services Enterprise): Primary business IS software OR technology services. Includes SaaS, Tech Giants, and large IT Services/Systems Integrators (TCS, Infosys, Accenture) with massive engineering cultures.
 
-Based on this data, assign exactly one category. Be precise and decisive.
+Extract the enterprise type JSON fields for company: {state.company_name}"""
 
-Respond in EXACT format:
-ENTERPRISE_TYPE: <E1 | E1.1 | E2 | E3>
-REASONING: <2-3 sentences explaining the classification with specific evidence>"""
-
-    response = await llm_query(
-        prompt,
-        model=llm_model or "claude-sonnet",  # Use strongest model for final categorization
-        temperature=0.05,  # Near-deterministic
+    result: CategorizationResult = await llm_structured_query(
+        prompt=prompt,
+        pydantic_model=CategorizationResult,
+        model=llm_model,
+        temperature=0.0,
     )
-    state.step_models_used[12] = llm_model or "claude-sonnet"
+    state.step_models_used[12] = llm_model or "default"
 
-    for line in response.strip().split("\n"):
-        if line.startswith("ENTERPRISE_TYPE:"):
-            val = line.split(":", 1)[1].strip()
-            # Validate
-            if val in ["E1", "E1.1", "E2", "E3"]:
-                state.col32_enterprise_type = val
-            else:
-                state.col32_enterprise_type = "E2"  # safe default
-                state.add_note(f"Enterprise type parse failed (got '{val}') — defaulted to E2.")
-        elif line.startswith("REASONING:"):
-            reasoning = line.split(":", 1)[1].strip()
-            state.add_log(12, f"Categorization reasoning: {reasoning}")
-            state.add_note(f"E-type reasoning: {reasoning}")
+    if result.enterprise_type in ["E1", "E1.1", "E2", "E3"]:
+        state.col32_enterprise_type = result.enterprise_type
+    else:
+        state.col32_enterprise_type = "E2"
+        state.add_note(f"Enterprise type parse returned '{result.enterprise_type}' — defaulted to E2.")
+
+    if result.reasoning:
+        state.add_log(12, f"Categorization reasoning: {result.reasoning}")
+        state.add_note(f"E-type reasoning: {result.reasoning}")
 
     state.add_log(12, f"Final enterprise type: {state.col32_enterprise_type}")
     return state

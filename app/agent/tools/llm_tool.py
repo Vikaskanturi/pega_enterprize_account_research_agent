@@ -138,6 +138,68 @@ async def llm_query(
         raise ValueError(f"Unknown LLM provider: {provider}")
 
 
+async def llm_structured_query(
+    prompt: str,
+    pydantic_model,
+    system: str = "You are an expert B2B sales research analyst. Always respond with valid JSON only.",
+    model: Optional[str] = None,
+    temperature: float = 0.05,
+) -> object:
+    """
+    Request a structured JSON response from the LLM and parse it into a Pydantic model.
+    Eliminates all fragile line.split() string parsing from step files.
+
+    Args:
+        prompt: The user prompt describing what to extract
+        pydantic_model: A Pydantic BaseModel class describing the expected output schema
+        system: System instruction (defaults to JSON-mode instruction)
+        model: Model name (see MODEL_PRESETS)
+        temperature: Near-zero for deterministic structured output
+
+    Returns:
+        An instance of pydantic_model populated with extracted values, or a default instance on failure
+    """
+    import json
+
+    schema = pydantic_model.model_json_schema()
+    structured_prompt = f"""{prompt}
+
+IMPORTANT: You MUST respond with ONLY a valid JSON object that exactly matches this schema. No markdown, no explanations, no code blocks — pure JSON only.
+
+Required JSON schema:
+{json.dumps(schema, indent=2)}"""
+
+    raw = await llm_query(structured_prompt, system=system, model=model, temperature=temperature)
+
+    # Strip markdown code fences if the model wrapped the JSON anyway
+    clean = raw.strip()
+    if clean.startswith("```"):
+        clean = clean.split("```")[1]
+        if clean.startswith("json"):
+            clean = clean[4:]
+        clean = clean.strip()
+    if clean.endswith("```"):
+        clean = clean[:-3].strip()
+
+    try:
+        data = json.loads(clean)
+        return pydantic_model(**data)
+    except Exception:
+        # Last resort: extract first JSON object from the text
+        import re
+        match = re.search(r"\{.*\}", clean, re.DOTALL)
+        if match:
+            try:
+                data = json.loads(match.group(0))
+                return pydantic_model(**data)
+            except Exception:
+                pass
+        # Return a default instance so callers don't crash
+        return pydantic_model()
+
+
+
+
 async def _query_gemini(prompt: str, system: str, model: str, temperature: float) -> str:
     genai = _get_gemini()
     loop = asyncio.get_event_loop()

@@ -64,18 +64,33 @@ async def _new_page(browser: Browser) -> Page:
 
 
 async def fetch_page_text(url: str, wait_for: str = "domcontentloaded", timeout: int = 30000) -> str:
-    """Navigate to a URL and return the visible text content."""
+    """Navigate to a URL and return page content as clean Markdown for better LLM context."""
     browser = await get_browser()
     page = await _new_page(browser)
     try:
         await page.goto(url, wait_until=wait_for, timeout=timeout)
         await asyncio.sleep(2)
-        text = await page.evaluate("() => document.body.innerText")
-        return text or ""
+        # Get raw HTML for semantic conversion
+        html = await page.evaluate("() => document.body.innerHTML")
+        if not html:
+            return ""
+        # Convert HTML → clean Markdown (much better semantic structure for LLMs)
+        try:
+            from markdownify import markdownify as md
+            text = md(html, heading_style="ATX", strip=["script", "style", "img", "video"])
+            # Collapse excessive whitespace
+            import re
+            text = re.sub(r"\n{3,}", "\n\n", text)
+            return text[:8000]  # Larger limit since Markdown is more compact
+        except ImportError:
+            # Graceful fallback if markdownify somehow not available
+            text = await page.evaluate("() => document.body.innerText")
+            return text[:4000] if text else ""
     except Exception as e:
-        return f"ERROR: {e}"
+        return f"ERROR fetching {url}: {e}"
     finally:
         await page.close()
+
 
 
 async def get_linkedin_company_info(linkedin_url: str) -> dict:

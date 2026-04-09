@@ -49,12 +49,9 @@
       <!-- Model Selector -->
       <div class="model-card">
         <div class="card-label">🤖 LLM Model</div>
-        <div class="model-grid" id="model-grid">
-          <!-- Populated by JS -->
-        </div>
         
         <div style="margin-top: 12px; padding: 10px; background: rgba(0,0,0,0.15); border: 1px solid var(--border); border-radius: 8px;">
-          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; font-weight: 600;">Or Specify Custom Model</div>
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; font-weight: 600;">Specify Custom Model</div>
           <div style="display: flex; gap: 8px;">
             <select id="custom-provider" class="input-field" style="width: 110px; padding: 6px; font-size: 12px; height: 32px;">
               <option value="groq">Groq</option>
@@ -169,6 +166,11 @@
           <div class="results-toolbar">
             <div class="results-toolbar-title">Research Results</div>
             <div style="display:flex;gap:8px;align-items:center;">
+              <button class="download-btn" id="save-local-btn" onclick="saveLocally()" disabled
+                title="Save the results locally to a master Excel file"
+                style="background: linear-gradient(135deg,#3B82F6,#2563EB); opacity:0.45; cursor:not-allowed;">
+                💾 Save Locally
+              </button>
               <button class="download-btn" id="export-btn" onclick="exportToExcel()" disabled
                 title="Generate a fresh Excel file from the currently displayed data"
                 style="background: linear-gradient(135deg,#059669,#10b981); opacity:0.45; cursor:not-allowed;">

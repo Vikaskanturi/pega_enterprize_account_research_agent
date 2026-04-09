@@ -20,9 +20,9 @@ async def run(state: ResearchState, **kwargs) -> ResearchState:
 
     if result == "Partner":
         state.col9_pega_customer_partner = "Partner"
-        state.stopped_early = True
-        state.completed = True
-        state.add_log(1, "STOP — company is a Pega Partner. Halting research.")
+        # NOTE: Do NOT stop early. Being a Pega Partner is just a data point.
+        # Continue all 13 steps to fully populate headcount, GCC, firmographics etc.
+        state.add_log(1, "Company is a Pega Partner — continuing full research pipeline.")
     elif result == "Customer":
         state.col9_pega_customer_partner = "Customer"
     else:

@@ -202,3 +202,106 @@ def write_output_excel(rows: list[dict], output_path: str = "output/research_res
 
     wb.save(output_path)
     return output_path
+
+
+def append_to_master_excel(row_data: dict, output_path: str = "pega_master_data.xlsx"):
+    """
+    Append a research result row to a master Excel file.
+    If the file doesn't exist, it creates a new one.
+    Deprecated: prefer upsert_to_master_excel for the shared output file.
+    """
+    return upsert_to_master_excel(row_data, output_path=output_path)
+
+
+MASTER_OUTPUT_PATH = "output/research_results.xlsx"
+
+
+def upsert_to_master_excel(
+    row_data: dict,
+    output_path: str = MASTER_OUTPUT_PATH,
+) -> str:
+    """
+    Save a research result into a single shared Excel file.
+
+    Behaviour:
+    - If the file does not exist → create it fresh (with header + this row).
+    - If the file exists and a row already has the same Company Name
+      (case-insensitive) → update every column in that row in-place.
+    - If the file exists but no matching company row found → append a new row.
+
+    Args:
+        row_data: Dict matching ResearchState.to_excel_row().
+        output_path: Path to the shared master Excel file.
+
+    Returns:
+        The output_path that was written.
+    """
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    # ── File does not exist yet → create brand-new ────────────────────────────
+    if not os.path.exists(output_path):
+        return write_output_excel([row_data], output_path=output_path)
+
+    # ── File exists → open and upsert ─────────────────────────────────────────
+    wb = openpyxl.load_workbook(output_path)
+    ws = wb.active
+
+    # Read existing headers from row 1
+    headers = [cell.value for cell in ws[1]]
+
+    # Determine the column index for "Company Name"
+    try:
+        company_col_idx = headers.index("Company Name") + 1  # 1-based
+    except ValueError:
+        company_col_idx = 1  # Fall back to column A
+
+    incoming_name = (row_data.get("Company Name") or "").strip().lower()
+
+    # Look for an existing row matching the company name (skip header row 1)
+    target_row_idx: Optional[int] = None
+    for row_idx in range(2, ws.max_row + 1):
+        cell_val = ws.cell(row=row_idx, column=company_col_idx).value or ""
+        if str(cell_val).strip().lower() == incoming_name:
+            target_row_idx = row_idx
+            break
+
+    # If no existing row found, append after the last data row
+    if target_row_idx is None:
+        target_row_idx = ws.max_row + 1
+
+    # Styling helpers
+    is_alt = target_row_idx % 2 == 0
+    bg = ROW_ALT if is_alt else ROW_NORMAL
+    enterprise_type = row_data.get("Enterprise Type", "")
+    etype_color = ENTERPRISE_COLORS.get(enterprise_type)
+    thin = Side(style="thin", color="CBD5E1")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    # Write (or overwrite) every column in the target row
+    for col_idx, header in enumerate(headers, 1):
+        if not header:
+            continue
+        value = row_data.get(header, "")
+        cell = ws.cell(row=target_row_idx, column=col_idx, value=str(value) if value else "")
+        cell.font = Font(name="Calibri", size=10)
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+        cell.border = border
+
+        if header == "Enterprise Type" and etype_color:
+            cell.fill = PatternFill(fill_type="solid", fgColor=etype_color)
+            cell.font = Font(name="Calibri", bold=True, color="FFFFFF", size=10)
+        elif header == "Pega Usage Confirmed":
+            if value == "Yes":
+                cell.fill = PatternFill(fill_type="solid", fgColor="D1FAE5")
+            elif value == "No":
+                cell.fill = PatternFill(fill_type="solid", fgColor="FEE2E2")
+            elif value == "Unconfirmed":
+                cell.fill = PatternFill(fill_type="solid", fgColor="FEF9C3")
+            else:
+                cell.fill = PatternFill(fill_type="solid", fgColor=bg)
+        else:
+            cell.fill = PatternFill(fill_type="solid", fgColor=bg)
+
+    ws.row_dimensions[target_row_idx].height = 30
+    wb.save(output_path)
+    return output_path
