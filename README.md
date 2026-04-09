@@ -52,7 +52,24 @@ ANTHROPIC_API_KEY=                       # Optional
 
 > **Minimum**: You need at least one LLM API key. Gemini has a free tier at [ai.google.dev](https://ai.google.dev).
 
-### 3. Launch the server
+### 3. Setup Local LLMs (Ollama / LMStudio) *Optional*
+
+If you prefer to run models locally for privacy or cost reasons, the agent supports **Ollama** and **LM Studio**.
+
+**For Ollama:**
+1. Install [Ollama](https://ollama.com/) and download a model (e.g., `ollama pull llama3`).
+2. Ensure Ollama is running, then update your `.env` file:
+   ```env
+   OLLAMA_BASE_URL=http://localhost:11434
+   OLLAMA_MODEL=llama3
+   ```
+
+**For LM Studio:**
+1. Install [LM Studio](https://lmstudio.ai/).
+2. Load a model and start the **Local Server** (ensure it is running on the default port `1234`).
+3. The Pega Research Agent will automatically detect models running on LM Studio. You can also manage and switch models directly from the agent's web UI.
+
+### 4. Launch the server
 
 ```bash
 python run.py
